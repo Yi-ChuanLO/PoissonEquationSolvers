@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.fftpack import dct, idct
+from scipy.fft import dct, idct
 from scipy.linalg import solve_banded
 
 class StreamFuncSolOnLatLon:
