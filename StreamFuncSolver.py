@@ -69,7 +69,9 @@ class StreamFuncSolOnLatLon:
 
     def solve(self, R: np.ndarray, south=None, north=None, west=None, east=None) -> np.ndarray:
         """
-        Solve ∇²ψ = R with Neumann BCs via DCT-II + tridiagonal φ solves.
+        Solve ∇²ψ = (1/(a² cosφ)) ∂/∂φ(cosφ ∂ψ/∂φ) + (1/(a² cos²φ)) ∂²ψ/∂λ² = R with Neumann BCs via DCT-II + tridiagonal φ solves.
+        To avoid some extreme cases that cosφ is very close to 0, it actually solve following equation.
+        --> cosφ∂/∂φ(cosφ ∂ψ/∂φ) + ∂²ψ/∂λ², and RHS = a² cos²φ * R.
         """
         # scale RHS
         RHS = self.a**2 * (self.cosφ**2)[:,None] * R
