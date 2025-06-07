@@ -67,7 +67,7 @@ class StreamFuncSolOnLatLon:
         zeta = (dvcos_dλ - du_dφ) / (self.a * self.cosφ)[:,None]
         return zeta
 
-    def solve(self, R: np.ndarray, south=None, north=None, west=None, east=None) -> np.ndarray:
+    def solve(self, R: np.ndarray, south=0, north=0, west=0, east=0) -> np.ndarray:
         """
         Solve ∇²ψ = (1/(a² cosφ)) ∂/∂φ(cosφ ∂ψ/∂φ) + (1/(a² cos²φ)) ∂²ψ/∂λ² = R with Neumann BCs via DCT-II + tridiagonal φ solves.
         To avoid some extreme cases that cosφ is very close to 0, it actually solve following equation.
@@ -93,7 +93,7 @@ class StreamFuncSolOnLatLon:
         for m in range(self.Nλ):
             ab = self._ab.copy()
             ab[1,:] += self._lam_eig[m]
-            psihat[:,m] = solve_banded((1,1), ab, Rhat[:,m])
+            psihat[:,m] = solve_banded((1,1), ab, Rhat[:,m], overwrite_ab=True, overwrite_b=True)
         # invert DCT
         psi = idct(psihat, axis=1, type=2, norm='ortho')
         return psi
