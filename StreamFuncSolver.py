@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.fft import dct, idct
-from scipy.linalg import solve_banded
+from scipy.linalg import solve_banded, lstsq
 
 class StreamFuncSolOnLatLon:
     """
@@ -20,8 +20,8 @@ class StreamFuncSolOnLatLon:
 
         # Precompute metric terms
         self.cosφ = np.cos(self.φ)
-        self.cosφ_p = np.cos(self.φ + 0.5*self.Δφ)
-        self.cosφ_m = np.cos(self.φ - 0.5*self.Δφ)
+        self.cos2 = self.cosφ ** 2
+        self.sin2φ = np.sin(2*self.φ)
         # Precompute φ-band coefficients
         self._build_lat_bands()
         # Precompute λ eigenvalues for DCT-II Neumann
@@ -36,13 +36,13 @@ class StreamFuncSolOnLatLon:
         for j in range(Nφ):
             if j == 0:
                 Bj = 0.0
-                Dj = self.cosφ[j]*self.cosφ_p[j]/self.Δφ**2
+                Dj = self.cos2[j]/self.Δφ**2
             elif j == Nφ-1:
-                Bj = self.cosφ[j]*self.cosφ_m[j]/self.Δφ**2
+                Bj = self.cos2[j]/self.Δφ**2
                 Dj = 0.0
             else:
-                Bj = self.cosφ[j]*self.cosφ_m[j]/self.Δφ**2
-                Dj = self.cosφ[j]*self.cosφ_p[j]/self.Δφ**2
+                Bj = self.cos2[j]/self.Δφ**2 + self.sin2φ[j]/(4*self.Δφ)
+                Dj = self.cos2[j]/self.Δφ**2 - self.sin2φ[j]/(4*self.Δφ)
             B[j], D[j] = Bj, Dj
             C[j] = -(Bj + Dj)
         # Assemble banded matrix rows: (super, main, sub)
@@ -71,15 +71,15 @@ class StreamFuncSolOnLatLon:
         """
         Solve ∇²ψ = (1/(a² cosφ)) ∂/∂φ(cosφ ∂ψ/∂φ) + (1/(a² cos²φ)) ∂²ψ/∂λ² = R with Neumann BCs via DCT-II + tridiagonal φ solves.
         To avoid some extreme cases that cosφ is very close to 0, it actually solve following equation.
-        --> cosφ∂/∂φ(cosφ ∂ψ/∂φ) + ∂²ψ/∂λ², and RHS = a² cos²φ * R.
+        --> cos²φ∂²ψ/∂φ² - 0.5*sin(2φ)∂ψ/∂φ + ∂²ψ/∂λ², and RHS = a² cos²φ * R.
         """
         # scale RHS
-        RHS = self.a**2 * (self.cosφ**2)[:,None] * R
+        RHS = self.a**2 * self.cos2[:,None] * R
         # apply BCs
         if south is not None:
-            RHS[0,:]  = 0.5*RHS[0,:]  + south * self.cosφ[0]*self.cosφ_p[0]/self.Δφ
+            RHS[0,:]  = 0.5*RHS[0,:]  + south * (self.cos2[0]/self.Δφ + self.sin2φ[0]/4)
         if north is not None:
-            RHS[-1,:] = 0.5*RHS[-1,:] - north * self.cosφ[-1]*self.cosφ_m[-1]/self.Δφ
+            RHS[-1,:] = 0.5*RHS[-1,:] - north * (self.cos2[-1]/self.Δφ - self.sin2φ[-1]/4)
         if west is not None:
             RHS[:,0]  = 0.5*RHS[:,0]  + west/self.Δλ
         if east is not None:
@@ -93,7 +93,20 @@ class StreamFuncSolOnLatLon:
         for m in range(self.Nλ):
             ab = self._ab.copy()
             ab[1,:] += self._lam_eig[m]
-            psihat[:,m] = solve_banded((1,1), ab, Rhat[:,m], overwrite_ab=True, overwrite_b=True)
+            try:
+                psihat[:,m] = solve_banded((1,1), ab, Rhat[:,m])
+            except np.linalg.LinAlgError:
+                # Singular matrix: use lstsq fallback
+                A = np.zeros((self.Nφ, self.Nφ))
+                # Fill tridiagonal matrix A from ab
+                for i in range(self.Nφ):
+                    A[i,i] = ab[1,i]
+                    if i > 0:
+                        A[i,i-1] = ab[2,i-1]
+                    if i < self.Nφ-1:
+                        A[i,i+1] = ab[0,i+1]
+                psihat[:,m], *_ = lstsq(A, Rhat[:,m])
+
         # invert DCT
         psi = idct(psihat, axis=1, type=2, norm='ortho')
         return psi
@@ -111,4 +124,3 @@ class StreamFuncSolOnLatLon:
         u = -dpsi_dφ/(self.a * self.cosφ)[:,None]
         v =  dpsi_dλ/self.a
         return u, v
-
