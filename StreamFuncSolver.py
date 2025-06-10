@@ -51,22 +51,6 @@ class StreamFuncSolOnLatLon:
         self._ab[1, :]  = C
         self._ab[2, :-1]= B[1:]
 
-    def compute_vorticity(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:
-        # ... identical to old implementation ...
-        vcos = v * self.cosφ[:, None]
-        dvcos_dλ = np.zeros_like(vcos)
-        du_dφ = np.zeros_like(u)
-        # λ-derivative
-        dvcos_dλ[:,1:-1] = (vcos[:,2:] - vcos[:,:-2])/(2*self.Δλ)
-        dvcos_dλ[:,0]    = (-3*vcos[:,0] +4*vcos[:,1] - vcos[:,2])/(2*self.Δλ)
-        dvcos_dλ[:,-1]   = ( 3*vcos[:,-1] -4*vcos[:,-2] +vcos[:,-3])/(2*self.Δλ)
-        # φ-derivative
-        du_dφ[1:-1,:] = (u[2:,:] - u[:-2,:])/(2*self.Δφ)
-        du_dφ[0,:]    = (-3*u[0,:] +4*u[1,:] - u[2,:])/(2*self.Δφ)
-        du_dφ[-1,:]   = ( 3*u[-1,:]-4*u[-2,:]+ u[-3,:])/(2*self.Δφ)
-        zeta = (dvcos_dλ - du_dφ) / (self.a * self.cosφ)[:,None]
-        return zeta
-
     def solve(self, R: np.ndarray, south=0, north=0, west=0, east=0) -> np.ndarray:
         """
         Solve ∇²ψ = (1/(a² cosφ)) ∂/∂φ(cosφ ∂ψ/∂φ) + (1/(a² cos²φ)) ∂²ψ/∂λ² = R with Neumann BCs via DCT-II + tridiagonal φ solves.
@@ -104,17 +88,42 @@ class StreamFuncSolOnLatLon:
         # invert DCT
         psi = idct(psihat, axis=1, type=2, norm='ortho')
         return psi
+    
+    def _derivative(self, fλ: np.ndarray, fφ: np.ndarray):
+        df_dλ, df_dφ = np.zeros_like(fλ), np.zeros_like(fφ)
 
-    def compute_uv_from_streamfunction(self, psi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        # ... identical to old implementation ...
-        dpsi_dφ = np.zeros_like(psi)
-        dpsi_dλ = np.zeros_like(psi)
-        dpsi_dφ[1:-1,:] = (psi[2:,:] - psi[:-2,:])/(2*self.Δφ)
-        dpsi_dφ[0,:]    = (-3*psi[0,:]+4*psi[1,:]-psi[2,:])/(2*self.Δφ)
-        dpsi_dφ[-1,:]   = ( 3*psi[-1,:]-4*psi[-2,:]+psi[-3,:])/(2*self.Δφ)
-        dpsi_dλ[:,1:-1] = (psi[:,2:] - psi[:,:-2])/(2*self.Δλ)
-        dpsi_dλ[:,0]    = (-3*psi[:,0]+4*psi[:,1]-psi[:,2])/(2*self.Δλ)
-        dpsi_dλ[:,-1]   = ( 3*psi[:,-1]-4*psi[:,-2]+psi[:,-3])/(2*self.Δλ)
-        u = -dpsi_dφ/(self.a * self.cosφ)[:,None]
-        v =  dpsi_dλ/self.a
-        return u, v
+        df_dλ[:,1:-1] = fλ[:,2:] - fλ[:,:-2]
+        df_dλ[:,0]    = -3*fλ[:,0] + 4*fλ[:,1] - fλ[:,2]
+        df_dλ[:,-1]   =  3*fλ[:,-1] - 4*fλ[:,-2] + fλ[:,-3]
+
+        # φ-derivative
+        df_dφ[1:-1,:] = fφ[2:,:] - fφ[:-2,:]
+        df_dφ[0,:]    = -3*fφ[0,:] + 4*fφ[1,:] - fφ[2,:]
+        df_dφ[-1,:]   =  3*fφ[-1,:] - 4*fφ[-2,:] + fφ[-3,:]
+
+        return df_dλ / (2 * self.Δλ), df_dφ / (2 * self.Δφ)
+
+    
+    def compute_vorticity(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+        ucos = u * self.cosφ[:,None]
+        dv_dλ, ducos_dφ = self._derivative(v, ucos)
+
+        return (dv_dλ - ducos_dφ) / (self.a * self.cosφ)[:,None]
+    
+    def compute_divergence(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+        vcos = v * self.cosφ[:,None]
+        du_dλ, dvcos_dφ = self._derivative(u, vcos)
+
+        return (du_dλ + dvcos_dφ) / (self.a * self.cosφ)[:,None]
+    
+    def compute_uv_from_ψ(self, ψ):
+        dψ_dλ, dψ_dφ = self._derivative(ψ, ψ)
+
+        return -dψ_dφ / self.a, dψ_dλ / (self.a * self.cosφ)[:,None]
+    
+    def compute_uv_from_χ(self, χ):
+        dχ_dλ, dχ_dφ = self._derivative(χ, χ)
+
+        return dχ_dλ / (self.a * self.cosφ)[:,None], dχ_dφ / self.a
+
+
