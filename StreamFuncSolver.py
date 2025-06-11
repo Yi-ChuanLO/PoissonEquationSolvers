@@ -89,41 +89,37 @@ class StreamFuncSolOnLatLon:
         psi = idct(psihat, axis=1, type=2, norm='ortho')
         return psi
     
-    def _derivative(self, fλ: np.ndarray, fφ: np.ndarray):
-        df_dλ, df_dφ = np.zeros_like(fλ), np.zeros_like(fφ)
-
-        df_dλ[:,1:-1] = fλ[:,2:] - fλ[:,:-2]
-        df_dλ[:,0]    = -3*fλ[:,0] + 4*fλ[:,1] - fλ[:,2]
-        df_dλ[:,-1]   =  3*fλ[:,-1] - 4*fλ[:,-2] + fλ[:,-3]
-
-        # φ-derivative
-        df_dφ[1:-1,:] = fφ[2:,:] - fφ[:-2,:]
-        df_dφ[0,:]    = -3*fφ[0,:] + 4*fφ[1,:] - fφ[2,:]
-        df_dφ[-1,:]   =  3*fφ[-1,:] - 4*fφ[-2,:] + fφ[-3,:]
-
-        return df_dλ / (2 * self.Δλ), df_dφ / (2 * self.Δφ)
-
-    
     def compute_vorticity(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:
         ucos = u * self.cosφ[:,None]
-        dv_dλ, ducos_dφ = self._derivative(v, ucos)
+        dv_dλ = np.gradient(v, self.Δλ, axis=1, edge_order=2)
+        ducos_dφ = np.gradient(ucos, self.Δφ, axis=0, edge_order=2)
 
         return (dv_dλ - ducos_dφ) / (self.a * self.cosφ)[:,None]
     
     def compute_divergence(self, u: np.ndarray, v: np.ndarray) -> np.ndarray:
         vcos = v * self.cosφ[:,None]
-        du_dλ, dvcos_dφ = self._derivative(u, vcos)
+        du_dλ = np.gradient(u, self.Δλ, axis=1, edge_order=2)
+        dvcos_dφ = np.gradient(vcos, self.Δφ, axis=0, edge_order=2)
 
         return (du_dλ + dvcos_dφ) / (self.a * self.cosφ)[:,None]
     
     def compute_uv_from_ψ(self, ψ):
-        dψ_dλ, dψ_dφ = self._derivative(ψ, ψ)
+        dψ_dφ, dψ_dλ = np.gradient(ψ, self.Δφ, self.Δλ, edge_order=2)
 
         return -dψ_dφ / self.a, dψ_dλ / (self.a * self.cosφ)[:,None]
     
     def compute_uv_from_χ(self, χ):
-        dχ_dλ, dχ_dφ = self._derivative(χ, χ)
+        dχ_dφ, dχ_dλ = np.gradient(χ, self.Δφ, self.Δλ, edge_order=2)
 
         return dχ_dλ / (self.a * self.cosφ)[:,None], dχ_dφ / self.a
-
-
+    
+    def circulation_intergral(self, south, north, east,  west):
+        a = np.trapezoid(south, self.a * self.cosφ[0] * self.λ)
+        c = np.trapezoid(north, self.a * self.cosφ[-1] * self.λ)
+        b = np.trapezoid(east,  self.a * self.φ)
+        d = np.trapezoid(west,  self.a * self.φ)
+        return a - c + b - d
+    
+    def area_intergral(self, vort):
+        integrand = vort * self.a**2 * np.cos(self.φ)[:, None]
+        return np.trapezoid(np.trapezoid(integrand, self.λ, axis=1), self.φ)
